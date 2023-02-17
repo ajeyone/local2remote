@@ -1,0 +1,54 @@
+def aarInfo = gradle.aarInfoMap[project.path]
+def mavenInfo = gradle.getPropertiesFromFile(new File(rootDir, "local.properties"))
+
+final String PUBLICATION_NAME = "LocalAar"
+final String REPOSITORY_NAME = "InternalOtt"
+final String TASK_NAME_PUBLISH = "publish${PUBLICATION_NAME}PublicationTo${REPOSITORY_NAME}Repository"
+final String TASK_NAME_PUBLISH_LOCAL = "publish${PUBLICATION_NAME}PublicationToMavenLocal"
+
+apply plugin: 'maven-publish'
+
+publishing {
+    publications {
+        create(PUBLICATION_NAME, MavenPublication) {
+            groupId = aarInfo.aarGroupId
+            artifactId = aarInfo.aarArtifactId
+            version = aarInfo.aarVersion
+            artifact aarInfo.aarArtifact
+        }
+    }
+    repositories {
+        if (mavenInfo[KEY_MAVEN_URI]) {
+            maven {
+                name = REPOSITORY_NAME
+                url mavenInfo[KEY_MAVEN_URI]
+                if (mavenInfo[KEY_MAVEN_PASSWORD] && mavenInfo[KEY_MAVEN_USERNAME]) {
+                    credentials {
+                        username = mavenInfo[KEY_MAVEN_USERNAME]
+                        password = mavenInfo[KEY_MAVEN_PASSWORD]
+                    }
+                }
+            }
+        }
+    }
+}
+
+def aarUri = "${aarInfo.aarGroupId}:${aarInfo.aarArtifactId}:${aarInfo.aarVersion}"
+
+task generateAarUriOutputFile {
+    doLast {
+        new File(buildDir, "aar_uri.txt").with {
+            if (!buildDir.exists()) {
+                buildDir.mkdirs()
+            }
+            if (!it.exists()) {
+                it.createNewFile()
+            }
+            it.text = aarUri
+            println "L2R project(\"${project.path}\") aar_uri: ${aarUri}"
+        }
+    }
+}
+
+tasks.findByPath(TASK_NAME_PUBLISH)?.dependsOn(generateAarUriOutputFile)
+tasks.findByPath(TASK_NAME_PUBLISH_LOCAL)?.dependsOn(generateAarUriOutputFile)

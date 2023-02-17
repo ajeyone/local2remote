@@ -1,0 +1,93 @@
+rootProject.name = "local2remote"
+
+gradle.ext {
+    aarInfoMap = [:]
+}
+
+gradle.metaClass.getPropertiesFromFile = { File file ->
+    return new Properties().tap { prop ->
+        if (file.exists()) {
+            file.withInputStream { stream ->
+                prop.load(stream)
+            }
+        }
+    }
+}
+
+new File(rootDir, DIRECTORY_AARS).listFiles(new FileFilter() {
+    @Override
+    boolean accept(File file) {
+        return file.isDirectory()
+    }
+}).each { File dir ->
+    log "local aar dir: $dir"
+
+    File configFile = new File(dir, AAR_CONFIG_FILE_NAME)
+    if (!configFile.exists()) {
+        log "$dir: does no contain $AAR_CONFIG_FILE_NAME"
+        return
+    }
+    def aarFiles = dir.listFiles(new FilenameFilter() {
+        @Override
+        boolean accept(File f, String name) {
+            return name.toLowerCase().endsWith(".aar")
+        }
+    })
+    if (aarFiles.length == 0) {
+        log "$dir: no aar file"
+        return
+    }
+    if (aarFiles.length > 1) {
+        log "$dir: too many aar files, only one is accepted. files: $aarFiles"
+        return
+    }
+    def localFile = aarFiles[0]
+    createProject(configFile, localFile)
+}
+
+gradle.afterProject { Project project ->
+    if (project != project.rootProject) {
+        if (gradle.aarInfoMap[project.path]) {
+            project.apply from: "$rootDir/gradle/project-maven-publish.gradle"
+        }
+    }
+}
+
+def createProject(File configFile, File localFile) {
+    def properties = gradle.getPropertiesFromFile(configFile)
+    boolean missingConfig = [KEY_GROUP_ID, KEY_ARTIFACT_ID, KEY_VERSION_PREFIX].any { !properties.containsKey(it) }
+    if (missingConfig) {
+        log "some config is missing. properties: $properties"
+        return
+    }
+
+    def aarGroupId = properties[KEY_GROUP_ID]
+    def aarArtifactId = properties[KEY_ARTIFACT_ID]
+    def aarVersion = "${properties[KEY_VERSION_PREFIX]}.${localFile.bytes.md5().substring(0, 10)}"
+    def aarArtifact = localFile.path
+
+    // 1. include the project.
+    def projectPath = ":$aarArtifactId"
+    include projectPath
+
+    log "project(\"$projectPath\") config file: $configFile, properties: $properties"
+
+    // 2. redirect the project dir and create it if needed.
+    File aarUploadModuleDir = new File(rootDir, "$DIRECTORY_AUTO_PROJECTS/$aarArtifactId")
+    project(projectPath).projectDir = aarUploadModuleDir
+    log "project(\"$projectPath\").projectDir: ${aarUploadModuleDir}"
+    if (!aarUploadModuleDir.exists()) {
+        aarUploadModuleDir.mkdirs()
+    }
+
+    // save necessary information in "gradle" for task execution
+    gradle.aarInfoMap[projectPath] = [aarGroupId   : aarGroupId,
+                                      aarArtifactId: aarArtifactId,
+                                      aarVersion   : aarVersion,
+                                      aarArtifact  : aarArtifact]
+    log "project(\"$projectPath\") config: ${gradle.aarInfoMap[projectPath]}"
+}
+
+def log(String message) {
+    println "L2R settings: $message"
+}
